@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Miss Potato Diary</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Google Fonts: Gowun Batang & Noto Sans KR -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Gowun+Dodum&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // Global variables & Config initialization
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'miss-potato-diary-app';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+      apiKey: "demo-api-key",
+      authDomain: "demo.firebaseapp.com",
+      projectId: "demo-project",
+      storageBucket: "demo.appspot.com",
+      messagingSenderId: "123456789",
+      appId: "1:123456789:web:123456"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.db = db;
+    window.appId = appId;
+
+    // Authentication Setup
+    let currentUser = null;
+    window.onloadSync = async function() {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error:", err);
+      }
+
+      onAuthStateChanged(auth, (user) => {
+        if (user) {
+          currentUser = user;
+          setupRealtimeSync();
+        }
+      });
+    };
+
+    // Real-time listener setup using fixed Firestore rules path
+    function setupRealtimeSync() {
+      if (!currentUser) return;
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_diary_store', 'main');
+
+      onSnapshot(docRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data) {
+            window.appState = {
+              profile: { ...window.appState.profile, ...(data.profile || {}) },
+              todos: Array.isArray(data.todos) ? data.todos : window.DEFAULT_TODOS,
+              vaxList: Array.isArray(data.vaxList) ? data.vaxList : window.DEFAULT_VAX_LIST,
+              diaries: Array.isArray(data.diaries) ? data.diaries : window.DEFAULT_DIARIES
+            };
+            // Sync with local storage as secondary backup
+            try {
+              localStorage.setItem(window.STORAGE_KEY, JSON.stringify(window.appState));
+            } catch(e){}
+            window.updateSyncBadgeStatus(true);
+            window.renderAll();
+          }
+        } else {
+          // Push initial local state if document does not exist yet
+          window.saveStateCloud();
+        }
+      }, (error) => {
+        console.error("Realtime sync error:", error);
+        window.updateSyncBadgeStatus(false);
+      });
+    }
+
+    // Cloud Save Function
+    window.saveStateCloud = async function() {
+      if (!currentUser) return;
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_diary_store', 'main');
+        await setDoc(docRef, window.appState, { merge: true });
+        window.updateSyncBadgeStatus(true);
+      } catch (e) {
+        console.error("Error writing to Firestore:", e);
+        window.updateSyncBadgeStatus(false);
+      }
+    };
+  </script>
+
+  <script>
+    // State Default Values
+    window.STORAGE_KEY = 'miss_potato_diary_state_v1';
+
+    window.DEFAULT_PROFILE = {
+      name: 'Miss Potato',
+      birth: '2026-01-01',
+      img: '🥔',
+      motto: '서툴러도 괜찮아, 오늘도 우리 세 식구 화이팅!'
+    };
+
+    window.DEFAULT_TODOS = [
+      { id: 1, text: '아침 분유 180ml 먹이기', done: true },
+      { id: 2, text: '비타민D 영양제 챙겨주기', done: false },
+      { id: 3, text: '오후 터미타임 10분 진행', done: false }
+    ];
+
+    window.DEFAULT_VAX_LIST = [
+      { id: 1, name: 'B형간염 1차', period: '출생 직후', completed: true, date: '2026-01-01', note: '산부인과 퇴원 시 접종' },
+      { id: 2, name: 'BCG (결핵)', period: '4주 이내', completed: true, date: '2026-01-20', note: '소아과 경피용 접종' },
+      { id: 3, name: 'B형간염 2차', period: '1개월', completed: true, date: '2026-02-01', note: '열 없음' },
+      { id: 4, name: 'DTaP (디프테리아/파상풍/백일해) 1차', period: '2개월', completed: false, date: '', note: '' },
+      { id: 5, name: '폴리오 (폴리오) 1차', period: '2개월', completed: false, date: '', note: '' },
+      { id: 6, name: '폐구균 1차', period: '2개월', completed: false, date: '', note: '' },
+      { id: 7, name: '로타바이러스 1차', period: '2개월', completed: false, date: '', note: '' }
+    ];
+
+    window.DEFAULT_DIARIES = [
+      {
+        id: 1,
+        date: '2026-02-14',
+        author: '엄마',
+        content: '오늘 처음으로 눈을 맞추고 베시시 웃어주었다! 세상에서 제일 행복한 순간 💖',
+        imgUrl: ''
+      },
+      {
+        id: 2,
+        date: '2026-02-10',
+        author: '아빠',
+        content: '목욕시킬 때 예전보다 덜 울고 물놀이를 즐기는 것 같다. 건강하게 자라다오!',
+        imgUrl: ''
+      }
+    ];
+
+    // Load Local State initial fallback
+    function loadInitialState() {
+      try {
+        const saved = localStorage.getItem(window.STORAGE_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return {
+            profile: { ...window.DEFAULT_PROFILE, ...(parsed.profile || {}) },
+            todos: Array.isArray(parsed.todos) ? parsed.todos : window.DEFAULT_TODOS,
+            vaxList: Array.isArray(parsed.vaxList) ? parsed.vaxList : window.DEFAULT_VAX_LIST,
+            diaries: Array.isArray(parsed.diaries) ? parsed.diaries : window.DEFAULT_DIARIES
+          };
+        }
+      } catch (e) {
+        console.error("Failed to load local storage", e);
+      }
+      return {
+        profile: { ...window.DEFAULT_PROFILE },
+        todos: [...window.DEFAULT_TODOS],
+        vaxList: [...window.DEFAULT_VAX_LIST],
+        diaries: [...window.DEFAULT_DIARIES]
+      };
+    }
+
+    window.appState = loadInitialState();
+    let currentUploadedImgBase64 = '';
+    let vaxFilter = 'pending';
+
+    // Global save function
+    window.saveState = function() {
+      try {
+        localStorage.setItem(window.STORAGE_KEY, JSON.stringify(window.appState));
+      } catch(e){}
+      if (typeof window.saveStateCloud === 'function') {
+        window.saveStateCloud();
+      }
+    };
+
+    window.updateSyncBadgeStatus = function(isOnline) {
+      const badge = document.getElementById('syncBadge');
+      if (!badge) return;
+      if (isOnline) {
+        badge.className = "ml-2 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center gap-1";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 실시간 공유 중`;
+      } else {
+        badge.className = "ml-2 text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium flex items-center gap-1";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500"></span> 오프라인 모드`;
+      }
+    };
+
+    // Render All Components
+    window.renderAll = function() {
+      renderProfile();
+      renderTodos();
+      renderVaccinations();
+      renderDiaries();
+    };
+
+    window.addEventListener('DOMContentLoaded', () => {
+      // Set today's date in diary form
+      const dateInput = document.getElementById('diaryDate');
+      if (dateInput) dateInput.valueAsDate = new Date();
+
+      window.renderAll();
+
+      if (typeof window.onloadSync === 'function') {
+        window.onloadSync();
+      }
+    });
+  </script>
+  <style>
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background-color: #FAF7F2;
+      color: #4A403A;
+    }
+    .font-gowun {
+      font-family: 'Gowun Dodum', sans-serif;
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #F5EFE6;
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #D5C3A8;
+      border-radius: 10px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #B89B72;
+    }
+    .card-shadow {
+      box-shadow: 0 4px 20px -2px rgba(184, 155, 114, 0.12);
+    }
+  </style>
+</head>
+<body class="min-h-screen pb-12">
+
+  <!-- Header / Navigation -->
+  <header class="bg-white/80 backdrop-blur-md sticky top-0 z-30 border-b border-warm-200/50">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+      <div class="flex items-center gap-2">
+        <span class="bg-baby-pink p-2 rounded-full text-pink-400 text-xl shadow-sm">
+          <i class="fa-solid fa-heart"></i>
+        </span>
+        <h1 class="font-gowun text-xl md:text-2xl font-bold text-warm-500">Miss Potato Diary</h1>
+        <span id="syncBadge" class="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium flex items-center gap-1" title="남편과 실시간 연결됨">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> 실시간 공유 중
+        </span>
+      </div>
+      <div class="flex items-center gap-2 text-xs md:text-sm">
+        <button onclick="exportData()" class="px-3 py-1.5 rounded-full bg-warm-100 text-warm-500 hover:bg-warm-200 transition font-medium flex items-center gap-1.5" title="내보내기">
+          <i class="fa-solid fa-download"></i> <span class="hidden sm:inline">백업</span>
+        </button>
+        <label class="px-3 py-1.5 rounded-full bg-warm-100 text-warm-500 hover:bg-warm-200 transition font-medium cursor-pointer flex items-center gap-1.5" title="불러오기">
+          <i class="fa-solid fa-upload"></i> <span class="hidden sm:inline">복원</span>
+          <input type="file" id="importFile" onchange="importData(event)" class="hidden" accept=".json">
+        </label>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 pt-6 space-y-6">
+
+    <!-- Section 1: Baby Profile & D-day Banner -->
+    <section class="bg-gradient-to-r from-amber-50 via-rose-50 to-sky-50 rounded-3xl p-6 md:p-8 card-shadow border border-white/60 relative overflow-hidden">
+      <!-- Decoration -->
+      <div class="absolute -right-6 -bottom-6 w-32 h-32 bg-white/40 rounded-full blur-xl pointer-events-none"></div>
+      
+      <div class="flex flex-col md:flex-row items-center justify-between gap-6 relative z-10">
+        <div class="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left">
+          <div class="relative group cursor-pointer" onclick="openProfileModal()">
+            <div id="profileImageDisplay" class="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-4 border-white shadow-md bg-baby-yellow flex items-center justify-center overflow-hidden text-3xl">
+              🥔
+            </div>
+            <div class="absolute inset-0 bg-black/30 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs transition rounded-full">
+              <i class="fa-solid fa-camera mr-1"></i> 변경
+            </div>
+          </div>
+          
+          <div>
+            <div class="flex items-center justify-center sm:justify-start gap-2">
+              <h2 id="babyNameDisplay" class="font-gowun text-2xl sm:text-3xl font-bold text-gray-800">Miss Potato</h2>
+              <button onclick="openProfileModal()" class="text-warm-400 hover:text-warm-500 text-sm">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
+            </div>
+            <p id="babyBirthDisplay" class="text-xs text-warm-400 mt-1">2026.01.01 생</p>
+            <div class="mt-3 flex flex-wrap justify-center sm:justify-start gap-2">
+              <span id="dDayBadge" class="bg-rose-100 text-rose-600 px-3 py-1 rounded-full text-xs font-semibold shadow-sm">
+                D+0일
+              </span>
+              <span id="monthsBadge" class="bg-sky-100 text-sky-600 px-3 py-1 rounded-full text-xs font-semibold shadow-sm">
+                0개월차
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white/70 backdrop-blur-sm rounded-2xl p-4 w-full md:w-auto min-w-[260px] border border-white/80 shadow-sm text-center md:text-right">
+          <p class="text-xs text-warm-400 font-medium mb-1"><i class="fa-solid fa-quote-left mr-1 opacity-50"></i> 오늘의 육아 한마디</p>
+          <p id="mottoDisplay" class="font-gowun text-sm text-gray-700 italic">"서툴러도 괜찮아, 오늘도 우리 세 식구 화이팅!"</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Dashboard Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Left Column: To-Do & Diary Form/List (2 cols on lg) -->
+      <div class="space-y-6 lg:col-span-2">
+
+        <!-- Section 2: 육아 To-Do 리스트 -->
+        <section class="bg-white rounded-3xl p-5 card-shadow border border-warm-100">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-gowun font-bold text-lg text-gray-800 flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-amber-100 text-amber-500 flex items-center justify-center text-sm"><i class="fa-solid fa-list-check"></i></span>
+              오늘의 육아 To-Do
+            </h3>
+            <span id="todoCount" class="text-xs bg-warm-100 text-warm-500 px-2 py-0.5 rounded-full font-medium">0/0</span>
+          </div>
+
+          <!-- Add Todo Input -->
+          <form onsubmit="addTodo(event)" class="flex gap-2 mb-4">
+            <input type="text" id="todoInput" placeholder="할 일을 입력하세요..." required
+              class="flex-1 bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400 transition">
+            <button type="submit" class="bg-warm-400 hover:bg-warm-500 text-white rounded-xl px-3 py-2 text-sm transition">
+              <i class="fa-solid fa-plus"></i>
+            </button>
+          </form>
+
+          <!-- Todo List -->
+          <ul id="todoList" class="space-y-2 max-h-[260px] overflow-y-auto pr-1">
+            <!-- Dynamic Todo Items -->
+          </ul>
+        </section>
+
+        <!-- Section: 주요 기념일 D-Day (50일, 100일, 1년 등) -->
+        <section class="bg-white rounded-3xl p-5 card-shadow border border-warm-100">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-gowun font-bold text-lg text-gray-800 flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-purple-100 text-purple-500 flex items-center justify-center text-sm">
+                <i class="fa-solid fa-cake-candles"></i>
+              </span>
+              우리 아기 주요 기념일 D-Day
+            </h3>
+            <span class="text-xs text-warm-500 font-medium bg-warm-100 px-2 py-0.5 rounded-full" id="nextMilestoneLabel">D-Day 계산기</span>
+          </div>
+
+          <!-- Milestones Grid Container -->
+          <div id="milestoneGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 max-h-[320px] overflow-y-auto pr-1">
+            <!-- Dynamic Milestone Cards -->
+          </div>
+        </section>
+
+        <!-- Section 3: 육아일기 작성 -->
+        <section class="bg-white rounded-3xl p-5 sm:p-6 card-shadow border border-warm-100">
+          <h3 class="font-gowun font-bold text-lg text-gray-800 mb-4 flex items-center gap-2">
+            <span class="w-7 h-7 rounded-lg bg-rose-100 text-rose-500 flex items-center justify-center text-sm"><i class="fa-solid fa-pen"></i></span>
+            오늘의 육아일기 쓰기
+          </h3>
+
+          <form onsubmit="saveDiary(event)" class="space-y-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">날짜</label>
+                <input type="date" id="diaryDate" required
+                  class="w-full bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-gray-500 mb-1">작성자</label>
+                <div class="flex gap-2 pt-1">
+                  <label class="flex-1 bg-warm-50 border border-warm-200 rounded-xl py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium cursor-pointer hover:bg-rose-50 transition">
+                    <input type="radio" name="diaryAuthor" value="엄마" checked class="text-rose-500 focus:ring-rose-400"> 👩 엄마
+                  </label>
+                  <label class="flex-1 bg-warm-50 border border-warm-200 rounded-xl py-2 px-3 flex items-center justify-center gap-2 text-xs font-medium cursor-pointer hover:bg-sky-50 transition">
+                    <input type="radio" name="diaryAuthor" value="아빠" class="text-sky-500 focus:ring-sky-400"> 👨 아빠
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">오늘 아기의 모습 (사진 등록)</label>
+              <div class="flex flex-col sm:flex-row gap-2">
+                <input type="text" id="diaryImgUrl" placeholder="이미지 URL 직접 입력..."
+                  class="flex-1 bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+                <label class="px-4 py-2 bg-warm-100 hover:bg-warm-200 text-warm-600 rounded-xl text-xs font-semibold cursor-pointer flex items-center justify-center gap-1.5 transition whitespace-nowrap">
+                  <i class="fa-solid fa-image"></i> 사진 업로드
+                  <input type="file" accept="image/*" onchange="handleImageUpload(event)" class="hidden">
+                </label>
+              </div>
+              
+              <!-- Image Preview Container -->
+              <div id="imgPreviewContainer" class="mt-2 relative hidden inline-block">
+                <img id="imgPreview" class="w-24 h-24 object-cover rounded-xl border border-warm-200 shadow-sm" src="">
+                <button type="button" onclick="clearImagePreview()" class="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs shadow">
+                  <i class="fa-solid fa-xmark"></i>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-gray-500 mb-1">오늘의 기록 & 짧은 이야기</label>
+              <textarea id="diaryContent" rows="3" required placeholder="아기와의 소중한 순간이나 남편/아내에게 전달하고 싶은 한마디를 자유롭게 적어보세요..."
+                class="w-full bg-warm-50 border border-warm-200 rounded-xl p-3 text-sm focus:outline-none focus:border-warm-400 transition resize-none"></textarea>
+            </div>
+
+            <div class="flex justify-end">
+              <button type="submit" class="bg-warm-500 hover:bg-warm-600 text-white font-medium px-5 py-2.5 rounded-xl text-sm transition shadow-sm flex items-center gap-2">
+                <i class="fa-solid fa-heart"></i> 일기 저장하기
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <!-- Section 4: 일기 카드 목록 -->
+        <section class="space-y-4">
+          <div class="flex justify-between items-center">
+            <h3 class="font-gowun font-bold text-lg text-gray-800 flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-pink-100 text-pink-500 flex items-center justify-center text-sm"><i class="fa-solid fa-book-open"></i></span>
+              소중한 육아 기록들
+            </h3>
+            <span id="diaryCount" class="text-xs text-gray-500 font-medium">총 0개의 이야기</span>
+          </div>
+
+          <div id="diaryCardsList" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Dynamic Diary Cards -->
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Right Column: Vaccination Checklist (1 col on lg) -->
+      <div class="space-y-6 lg:col-span-1">
+
+        <!-- Section 5: 예방접종 및 건강 체크리스트 -->
+        <section class="bg-white rounded-3xl p-5 card-shadow border border-warm-100">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-gowun font-bold text-lg text-gray-800 flex items-center gap-2">
+              <span class="w-7 h-7 rounded-lg bg-sky-100 text-sky-500 flex items-center justify-center text-sm"><i class="fa-solid fa-syringe"></i></span>
+              예방접종 체크리스트
+            </h3>
+            <span id="vaxProgress" class="text-xs bg-sky-50 text-sky-600 px-2 py-0.5 rounded-full font-medium">0%</span>
+          </div>
+
+          <!-- Filter Tabs -->
+          <div class="flex gap-1 bg-warm-50 p-1 rounded-xl mb-3 text-xs">
+            <button onclick="filterVax('pending')" id="vaxTab-pending" class="flex-1 py-1.5 rounded-lg font-medium transition bg-white text-gray-700 shadow-sm">접종 예정</button>
+            <button onclick="filterVax('completed')" id="vaxTab-completed" class="flex-1 py-1.5 rounded-lg font-medium transition text-gray-500 hover:text-gray-700">접종 완료</button>
+            <button onclick="filterVax('all')" id="vaxTab-all" class="flex-1 py-1.5 rounded-lg font-medium transition text-gray-500 hover:text-gray-700">전체</button>
+          </div>
+
+          <!-- Vaccination List -->
+          <div id="vaxList" class="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
+            <!-- Dynamic Vaccination Items -->
+          </div>
+        </section>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- Profile Edit Modal -->
+  <div id="profileModal" class="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl p-6 max-w-md w-full card-shadow space-y-4 border border-warm-100">
+      <div class="flex justify-between items-center">
+        <h3 class="font-gowun font-bold text-lg text-gray-800">아기 프로필 수정</h3>
+        <button onclick="closeProfileModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+
+      <form onsubmit="saveProfile(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">아기 이름 / 태명</label>
+          <input type="text" id="inputBabyName" required class="w-full bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">생년월일</label>
+          <input type="date" id="inputBabyBirth" required class="w-full bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">프로필 아이콘 또는 이미지 URL</label>
+          <input type="text" id="inputBabyImg" placeholder="이모지(👶) 또는 이미지 URL" class="w-full bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1">오늘의 한마디</label>
+          <input type="text" id="inputMotto" class="w-full bg-warm-50 border border-warm-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-warm-400">
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" onclick="closeProfileModal()" class="px-4 py-2 rounded-xl bg-gray-100 text-gray-600 text-sm">취소</button>
+          <button type="submit" class="px-4 py-2 rounded-xl bg-warm-500 text-white text-sm hover:bg-warm-600">저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JavaScript Logic -->
+  <script>
+    // Render Milestone D-Days (Shows 3 relative to today: last completed, current/next, and upcoming)
+    function renderMilestones() {
+      const gridEl = document.getElementById('milestoneGrid');
+      if (!gridEl) return;
+      gridEl.innerHTML = '';
+
+      const birthStr = window.appState.profile.birth || '2026-01-01';
+      const birthDate = new Date(birthStr);
+      const today = new Date();
+      
+      // Reset hours to compare dates only
+      birthDate.setHours(0, 0, 0, 0);
+      const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+      // Generate Milestone list dynamically: 50일, 100일 단위(100~1000일), 그리고 1년~3년 단위
+      const milestones = [
+        { label: '50일', days: 50 }
+      ];
+
+      // Add 100-day increments up to 1000 days
+      for (let d = 100; d <= 1000; d += 100) {
+        milestones.push({ label: `${d}일`, days: d });
+      }
+
+      // Add Yearly milestones (1년, 2년, 3년)
+      milestones.push({ label: '첫돌 (1년)', days: 365 });
+      milestones.push({ label: '두돌 (2년)', days: 730 });
+      milestones.push({ label: '세돌 (3년)', days: 1095 });
+
+      // Sort all milestones by day count ascending
+      milestones.sort((a, b) => a.days - b.days);
+
+      // Map with calculated properties
+      const mappedMilestones = milestones.map(m => {
+        const targetDate = new Date(birthDate.getTime() + (m.days - 1) * 24 * 60 * 60 * 1000);
+        const diffMs = targetDate.getTime() - todayZero.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        return { ...m, targetDate, diffDays };
+      });
+
+      // Find index of the first upcoming or today milestone
+      let currentIndex = mappedMilestones.findIndex(m => m.diffDays >= 0);
+      if (currentIndex === -1) {
+        // If all milestones passed, anchor to the last ones
+        currentIndex = mappedMilestones.length - 1;
+      }
+
+      // Determine window indices to pick 3 items (1 past/current, 1 current/next, 1 future)
+      let startIndex = Math.max(0, currentIndex - 1);
+      let endIndex = startIndex + 3;
+
+      if (endIndex > mappedMilestones.length) {
+        endIndex = mappedMilestones.length;
+        startIndex = Math.max(0, endIndex - 3);
+      }
+
+      const displayMilestones = mappedMilestones.slice(startIndex, endIndex);
+
+      displayMilestones.forEach(m => {
+        const yyyy = m.targetDate.getFullYear();
+        const mm = String(m.targetDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(m.targetDate.getDate()).padStart(2, '0');
+        const formattedTarget = `${yyyy}.${mm}.${dd}`;
+
+        let statusBadge = '';
+        let cardBgClass = 'bg-warm-50/60 border-warm-200';
+        let textClass = 'text-gray-700';
+
+        if (m.diffDays < 0) {
+          // Past event
+          statusBadge = `<span class="text-[10px] bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-md font-semibold"><i class="fa-solid fa-check text-emerald-600 mr-0.5"></i>완료</span>`;
+          cardBgClass = 'bg-gray-50/80 border-gray-200 opacity-70';
+          textClass = 'text-gray-500';
+        } else if (m.diffDays === 0) {
+          // Today is D-Day
+          statusBadge = `<span class="text-[10px] bg-rose-500 text-white px-2 py-0.5 rounded-md font-bold animate-bounce">오늘!</span>`;
+          cardBgClass = 'bg-rose-50 border-rose-300 ring-2 ring-rose-300';
+          textClass = 'text-rose-700 font-bold';
+        } else {
+          // Future event
+          statusBadge = `<span class="text-[10px] bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-md font-semibold">D-${m.diffDays}</span>`;
+          if (m === mappedMilestones[currentIndex]) {
+            cardBgClass = 'bg-purple-50/80 border-purple-200 ring-1 ring-purple-300';
+            textClass = 'text-purple-900 font-bold';
+            const labelEl = document.getElementById('nextMilestoneLabel');
+            if (labelEl) labelEl.innerText = `다음: ${m.label} (D-${m.diffDays})`;
+          }
+        }
+
+        const card = document.createElement('div');
+        card.className = `p-3 rounded-2xl border text-center flex flex-col justify-between transition ${cardBgClass}`;
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between gap-1 mb-1">
+              <span class="text-xs font-bold ${textClass}">${m.label}</span>
+              ${statusBadge}
+            </div>
+            <p class="text-[11px] text-gray-500 font-medium mt-1">${formattedTarget}</p>
+          </div>
+        `;
+        gridEl.appendChild(card);
+      });
+    }
+
+    // 1. Render Profile & D-day
+    function renderProfile() {
+      const p = window.appState.profile;
+      document.getElementById('babyNameDisplay').innerText = p.name || 'Miss Potato';
+      document.getElementById('babyBirthDisplay').innerText = `${p.birth || '2026-01-01'} 생`;
+      document.getElementById('mottoDisplay').innerText = `"${p.motto || ''}"`;
+
+      // Profile Img or Emoji
+      const imgContainer = document.getElementById('profileImageDisplay');
+      if (p.img && (p.img.startsWith('http') || p.img.startsWith('data:image'))) {
+        imgContainer.innerHTML = `<img src="${p.img}" class="w-full h-full object-cover">`;
+      } else {
+        imgContainer.innerText = p.img || '🥔';
+      }
+
+      // Calculate D-day & Months
+      if (p.birth) {
+        const birthDate = new Date(p.birth);
+        const today = new Date();
+        
+        // D+Day
+        const diffTime = today - birthDate;
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
+        document.getElementById('dDayBadge').innerText = diffDays >= 0 ? `D+${diffDays}일` : `D${diffDays}일`;
+
+        // Months
+        let months = (today.getFullYear() - birthDate.getFullYear()) * 12 + (today.getMonth() - birthDate.getMonth());
+        if (today.getDate() < birthDate.getDate()) {
+          months--;
+        }
+        months = Math.max(0, months);
+        document.getElementById('monthsBadge').innerText = `${months}개월차`;
+      }
+      renderMilestones();
+    }
+
+    // Modal Handlers
+    function openProfileModal() {
+      document.getElementById('inputBabyName').value = window.appState.profile.name || '';
+      document.getElementById('inputBabyBirth').value = window.appState.profile.birth || '';
+      document.getElementById('inputBabyImg').value = window.appState.profile.img || '';
+      document.getElementById('inputMotto').value = window.appState.profile.motto || '';
+      document.getElementById('profileModal').classList.remove('hidden');
+    }
+
+    function closeProfileModal() {
+      document.getElementById('profileModal').classList.add('hidden');
+    }
+
+    function saveProfile(e) {
+      e.preventDefault();
+      window.appState.profile.name = document.getElementById('inputBabyName').value;
+      window.appState.profile.birth = document.getElementById('inputBabyBirth').value;
+      window.appState.profile.img = document.getElementById('inputBabyImg').value;
+      window.appState.profile.motto = document.getElementById('inputMotto').value;
+
+      saveState();
+      renderProfile();
+      closeProfileModal();
+    }
+
+    // 2. To-Do List Functions
+    function renderTodos() {
+      const listEl = document.getElementById('todoList');
+      listEl.innerHTML = '';
+
+      const doneCount = window.appState.todos.filter(t => t.done).length;
+      document.getElementById('todoCount').innerText = `${doneCount}/${window.appState.todos.length}`;
+
+      if (window.appState.todos.length === 0) {
+        listEl.innerHTML = `<li class="text-center text-xs text-gray-400 py-4">등록된 할 일이 없습니다.</li>`;
+        return;
+      }
+
+      window.appState.todos.forEach(todo => {
+        const li = document.createElement('li');
+        li.className = `flex items-center justify-between p-2.5 rounded-xl border transition ${todo.done ? 'bg-warm-50/50 border-gray-200' : 'bg-white border-warm-100 hover:border-warm-300'}`;
+        li.innerHTML = `
+          <label class="flex items-center gap-2.5 cursor-pointer flex-1 min-w-0">
+            <input type="checkbox" ${todo.done ? 'checked' : ''} onchange="toggleTodo(${todo.id})"
+              class="w-4 h-4 rounded text-warm-500 focus:ring-warm-400 border-gray-300 cursor-pointer">
+            <span class="text-sm truncate ${todo.done ? 'line-through text-gray-400' : 'text-gray-700'}">${escapeHtml(todo.text)}</span>
+          </label>
+          <button onclick="deleteTodo(${todo.id})" class="text-gray-300 hover:text-rose-400 text-xs px-1.5 transition">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        `;
+        listEl.appendChild(li);
+      });
+    }
+
+    function addTodo(e) {
+      e.preventDefault();
+      const input = document.getElementById('todoInput');
+      const text = input.value.trim();
+      if (!text) return;
+
+      window.appState.todos.unshift({
+        id: Date.now(),
+        text: text,
+        done: false
+      });
+
+      input.value = '';
+      saveState();
+      renderTodos();
+    }
+
+    function toggleTodo(id) {
+      const todo = window.appState.todos.find(t => t.id === id);
+      if (todo) {
+        todo.done = !todo.done;
+        saveState();
+        renderTodos();
+      }
+    }
+
+    function deleteTodo(id) {
+      window.appState.todos = window.appState.todos.filter(t => t.id !== id);
+      saveState();
+      renderTodos();
+    }
+
+    // 3. Vaccination Functions
+    function filterVax(type) {
+      vaxFilter = type;
+      ['pending', 'completed', 'all'].forEach(t => {
+        const btn = document.getElementById(`vaxTab-${t}`);
+        if (btn) {
+          if (t === type) {
+            btn.className = 'flex-1 py-1.5 rounded-lg font-medium transition bg-white text-gray-700 shadow-sm';
+          } else {
+            btn.className = 'flex-1 py-1.5 rounded-lg font-medium transition text-gray-500 hover:text-gray-700';
+          }
+        }
+      });
+      renderVaccinations();
+    }
+
+    function renderVaccinations() {
+      const listEl = document.getElementById('vaxList');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+
+      const completedCount = window.appState.vaxList.filter(v => v.completed).length;
+      const progressPercent = window.appState.vaxList.length ? Math.round((completedCount / window.appState.vaxList.length) * 100) : 0;
+      document.getElementById('vaxProgress').innerText = `${progressPercent}% 완료`;
+
+      let filtered = window.appState.vaxList;
+      if (vaxFilter === 'completed') filtered = window.appState.vaxList.filter(v => v.completed);
+      if (vaxFilter === 'pending') filtered = window.appState.vaxList.filter(v => !v.completed);
+
+      if (filtered.length === 0) {
+        listEl.innerHTML = `<div class="col-span-full text-center text-xs text-gray-400 py-6">해당하는 항목이 없습니다.</div>`;
+        return;
+      }
+
+      filtered.forEach(vax => {
+        const item = document.createElement('div');
+        item.className = `p-3.5 rounded-2xl border transition ${vax.completed ? 'bg-sky-50/40 border-sky-100' : 'bg-white border-warm-100'}`;
+        item.innerHTML = `
+          <div class="flex items-start justify-between gap-2">
+            <div class="flex items-start gap-2.5">
+              <input type="checkbox" ${vax.completed ? 'checked' : ''} onchange="toggleVax(${vax.id})"
+                class="mt-0.5 w-4 h-4 rounded text-sky-500 focus:ring-sky-400 border-gray-300 cursor-pointer">
+              <div>
+                <p class="text-sm font-semibold ${vax.completed ? 'text-sky-800' : 'text-gray-800'}">${escapeHtml(vax.name)}</p>
+                <span class="inline-block bg-warm-100 text-warm-600 text-[10px] px-1.5 py-0.5 rounded-md mt-0.5">${escapeHtml(vax.period)}</span>
+              </div>
+            </div>
+            ${vax.completed ? '<span class="text-xs text-sky-500 font-medium whitespace-nowrap"><i class="fa-solid fa-circle-check"></i> 완료</span>' : '<span class="text-xs text-amber-500 font-medium whitespace-nowrap">접종 전</span>'}
+          </div>
+
+          <div class="mt-2.5 pt-2 border-t border-warm-100/60 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <input type="date" value="${vax.date || ''}" onchange="updateVaxDetails(${vax.id}, 'date', this.value)"
+              class="bg-warm-50 border border-warm-200 rounded-lg px-2 py-1 text-gray-600 focus:outline-none focus:border-sky-300">
+            <input type="text" placeholder="메모 (병원, 열 여부 등)" value="${escapeHtml(vax.note || '')}" onchange="updateVaxDetails(${vax.id}, 'note', this.value)"
+              class="bg-warm-50 border border-warm-200 rounded-lg px-2 py-1 text-gray-600 focus:outline-none focus:border-sky-300">
+          </div>
+        `;
+        listEl.appendChild(item);
+      });
+    }
+
+    function toggleVax(id) {
+      const vax = window.appState.vaxList.find(v => v.id === id);
+      if (vax) {
+        vax.completed = !vax.completed;
+        if (vax.completed && !vax.date) {
+          vax.date = new Date().toISOString().split('T')[0];
+        }
+        saveState();
+        renderVaccinations();
+      }
+    }
+
+    function updateVaxDetails(id, field, value) {
+      const vax = window.appState.vaxList.find(v => v.id === id);
+      if (vax) {
+        vax[field] = value;
+        saveState();
+      }
+    }
+
+    // 4. Diary Functions
+    function handleImageUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(event) {
+        currentUploadedImgBase64 = event.target.result;
+        document.getElementById('imgPreview').src = currentUploadedImgBase64;
+        document.getElementById('imgPreviewContainer').classList.remove('hidden');
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearImagePreview() {
+      currentUploadedImgBase64 = '';
+      document.getElementById('diaryImgUrl').value = '';
+      document.getElementById('imgPreviewContainer').classList.add('hidden');
+    }
+
+    function saveDiary(e) {
+      e.preventDefault();
+      const date = document.getElementById('diaryDate').value;
+      const author = document.querySelector('input[name="diaryAuthor"]:checked').value;
+      const imgUrlInput = document.getElementById('diaryImgUrl').value.trim();
+      const content = document.getElementById('diaryContent').value.trim();
+
+      const finalImg = currentUploadedImgBase64 || imgUrlInput;
+
+      if (!content) return;
+
+      const newDiary = {
+        id: Date.now(),
+        date,
+        author,
+        content,
+        imgUrl: finalImg
+      };
+
+      window.appState.diaries.unshift(newDiary);
+      saveState();
+      renderDiaries();
+
+      // Reset Form
+      document.getElementById('diaryContent').value = '';
+      clearImagePreview();
+      document.getElementById('diaryDate').valueAsDate = new Date();
+    }
+
+    function deleteDiary(id) {
+      window.appState.diaries = window.appState.diaries.filter(d => d.id !== id);
+      saveState();
+      renderDiaries();
+    }
+
+    function renderDiaries() {
+      const listEl = document.getElementById('diaryCardsList');
+      listEl.innerHTML = '';
+
+      document.getElementById('diaryCount').innerText = `총 ${window.appState.diaries.length}개의 이야기`;
+
+      if (window.appState.diaries.length === 0) {
+        listEl.innerHTML = `
+          <div class="col-span-full bg-white rounded-3xl p-8 text-center text-gray-400 border border-warm-100">
+            <i class="fa-regular fa-comment-dots text-3xl mb-2 text-warm-300"></i>
+            <p class="text-sm">아직 작성된 육아일기가 없어요.</p>
+            <p class="text-xs mt-1">오늘의 첫 기록을 남겨보세요!</p>
+          </div>
+        `;
+        return;
+      }
+
+      window.appState.diaries.forEach(diary => {
+        const isMom = diary.author === '엄마';
+        const card = document.createElement('div');
+        card.className = "bg-white rounded-3xl overflow-hidden card-shadow border border-warm-100 flex flex-col justify-between hover:border-warm-300 transition group";
+        
+        card.innerHTML = `
+          <div>
+            ${diary.imgUrl ? `
+              <div class="w-full h-48 overflow-hidden bg-warm-50 relative">
+                <img src="${diary.imgUrl}" alt="일기 사진" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" onerror="this.src='https://placehold.co/600x400/FAF7F2/9A7B4F?text=Photo';">
+              </div>
+            ` : ''}
+            
+            <div class="p-5">
+              <div class="flex justify-between items-center mb-3">
+                <span class="text-xs font-semibold px-2.5 py-1 rounded-full ${isMom ? 'bg-rose-100 text-rose-600' : 'bg-sky-100 text-sky-600'}">
+                  ${isMom ? '👩 엄마' : '👨 아빠'}
+                </span>
+                <span class="text-xs text-gray-400"><i class="fa-regular fa-calendar mr-1"></i>${diary.date}</span>
+              </div>
+
+              <p class="text-sm text-gray-700 leading-relaxed font-gowun whitespace-pre-line">${escapeHtml(diary.content)}</p>
+            </div>
+          </div>
+
+          <div class="px-5 pb-4 pt-1 flex justify-end">
+            <button onclick="deleteDiary(${diary.id})" class="text-xs text-gray-300 hover:text-rose-400 transition">
+              <i class="fa-solid fa-trash-can mr-1"></i> 삭제
+            </button>
+          </div>
+        `;
+        listEl.appendChild(card);
+      });
+    }
+
+    // Backup & Restore
+    function exportData() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(window.appState, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `miss_potato_diary_backup_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function importData(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (imported.profile || imported.todos || imported.vaxList || imported.diaries) {
+            window.appState = {
+              profile: { ...window.appState.profile, ...(imported.profile || {}) },
+              todos: Array.isArray(imported.todos) ? imported.todos : [],
+              vaxList: Array.isArray(imported.vaxList) ? imported.vaxList : [],
+              diaries: Array.isArray(imported.diaries) ? imported.diaries : []
+            };
+            saveState();
+            renderAll();
+          }
+        } catch (err) {
+          console.error('File read error:', err);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Helper: Prevent XSS
+    function escapeHtml(str) {
+      return (str || '').replace(/&/g, "&amp;")
+                 .replace(/</g, "&lt;")
+                 .replace(/>/g, "&gt;")
+                 .replace(/"/g, "&quot;")
+                 .replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
