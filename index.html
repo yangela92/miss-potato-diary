@@ -57,9 +57,10 @@
       });
     };
 
-    // Real-time listener setup using required artifact public path
+    // Real-time listener setup using required artifact public path for SHARED data
     function setupRealtimeSync() {
       if (!currentUser) return;
+      // All devices sharing this app will connect to this exact document path
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_diary_store', 'main');
 
       onSnapshot(docRef, (docSnap) => {
@@ -89,7 +90,7 @@
       });
     }
 
-    // Cloud Save Function
+    // Cloud Save Function (Applies to all connected devices)
     window.saveStateCloud = async function() {
       if (!currentUser) return;
       try {
