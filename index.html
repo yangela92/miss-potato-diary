@@ -36,7 +36,7 @@
     window.db = db;
     window.appId = appId;
 
-    // Authentication Setup
+    // Authentication Setup & Anonymous Auto Sign-In
     let currentUser = null;
     window.onloadSync = async function() {
       try {
@@ -57,7 +57,7 @@
       });
     };
 
-    // Real-time listener setup using fixed Firestore rules path
+    // Real-time listener setup using required artifact public path
     function setupRealtimeSync() {
       if (!currentUser) return;
       const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_diary_store', 'main');
@@ -72,7 +72,7 @@
               vaxList: Array.isArray(data.vaxList) ? data.vaxList : window.DEFAULT_VAX_LIST,
               diaries: Array.isArray(data.diaries) ? data.diaries : window.DEFAULT_DIARIES
             };
-            // Sync with local storage as secondary backup
+            // Sync with local storage as secondary offline backup
             try {
               localStorage.setItem(window.STORAGE_KEY, JSON.stringify(window.appState));
             } catch(e){}
@@ -80,7 +80,7 @@
             window.renderAll();
           }
         } else {
-          // Push initial local state if document does not exist yet
+          // Initialize cloud store if document does not exist yet
           window.saveStateCloud();
         }
       }, (error) => {
